@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>workflow def</title>
+</head>
+<body>
+  <h1 id="title">workflow def</h1>
+  <p id="error"></p>
+  <p id="meta"></p>
+
+  <form id="archive">
+    <button>archive</button>
+  </form>
+  <form id="version">
+    <button>new version</button>
+  </form>
+  <p>new version archives this row and copies its tasks onto a new active version. existing workflow_ins stay pinned here.</p>
+
+  <h2>tasks in this workflow</h2>
+  <table id="slots"></table>
+
+  <form id="add">
+    <select name="task_def_id"></select>
+    required: <select name="required"><option value="true">yes</option><option value="false">no</option></select>
+    <button>add task</button>
+  </form>
+
+  <p><a href="/workflows.html">back</a></p>
+  <script src="/common.js"></script>
+  <script>
+    const id = qs("id");
+
+    async function load() {
+      const w = await api("GET", "/api/workflow-defs/" + id);
+      document.getElementById("title").textContent =
+        w.code + " v" + w.version + " — " + w.name;
+      document.getElementById("meta").textContent =
+        "id " + w.id + ", status " + w.status +
+        (w.supersedes_id ? ", supersedes " + w.supersedes_id : "");
+
+      const archived = w.status !== "active";
+      document.getElementById("archive").hidden = archived;
+      document.getElementById("version").hidden = archived;
+      document.getElementById("add").hidden = archived;
+
+      document.getElementById("slots").innerHTML =
+        "<tr><th>pos</th><th>task</th><th>required</th><th></th></tr>" +
+        w.tasks.map((t) =>
+          `<tr>
+            <td>${t.position}</td>
+            <td>${esc(t.task_name)} (task_def ${t.task_def_id})</td>
+            <td>${t.required ? "yes" : "no"}</td>
+            <td>${archived ? "" : `<form data-slot="${t.id}"><button>remove</button></form>`}</td>
+          </tr>`
+        ).join("");
+
+      const tasks = await api("GET", "/api/task-defs");
+      const used = new Set(w.tasks.map((t) => t.task_def_id));
+      const available = tasks.filter((t) => !used.has(t.id));
+      const sel = document.querySelector("[name=task_def_id]");
+      sel.innerHTML = available.length
+        ? available.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")
+        : '<option value="">(none left)</option>';
+    }
+
+    document.getElementById("add").onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const v = formValues(e.target);
+        if (!v.task_def_id) throw new Error("no task to add");
+        await api("POST", "/api/workflow-defs/" + id + "/tasks", {
+          task_def_id: Number(v.task_def_id),
+          required: v.required !== "false",
+        });
+        location.reload();
+      } catch (err) {
+        showError(err);
+      }
+    };
+
+    document.getElementById("slots").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        await api(
+          "POST",
+          "/api/workflow-defs/" + id + "/tasks/" + e.target.dataset.slot + "/delete"
+        );
+        location.reload();
+      } catch (err) {
+        showError(err);
+      }
+    });
+
+    document.getElementById("archive").onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await api("POST", "/api/workflow-defs/" + id + "/archive");
+        location.reload();
+      } catch (err) {
+        showError(err);
+      }
+    };
+
+    document.getElementById("version").onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const created = await api("POST", "/api/workflow-defs/" + id + "/new-version");
+        location.href = "/workflow.html?id=" + created.id;
+      } catch (err) {
+        showError(err);
+      }
+    };
+
+    load().catch(showError);
+  </script>
+</body>
+</html>

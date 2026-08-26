@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>workflow defs</title>
+</head>
+<body>
+  <h1>workflow defs</h1>
+  <p id="error"></p>
+  <form id="create">
+    code: <input name="code" required>
+    name: <input name="name" required>
+    <button>create v1</button>
+  </form>
+  <h2>list</h2>
+  <table id="list"></table>
+  <script src="/common.js"></script>
+  <script>
+    async function load() {
+      const rows = await api("GET", "/api/workflow-defs");
+      document.getElementById("list").innerHTML =
+        "<tr><th>id</th><th>code</th><th>version</th><th>name</th><th>status</th><th>tasks</th></tr>" +
+        rows.map((r) => {
+          const tasks = (r.tasks || []).map((t) => t.task_name).join(", ");
+          return `<tr>
+            <td>${r.id}</td>
+            <td><a href="/workflow.html?id=${r.id}">${esc(r.code)}</a></td>
+            <td>${r.version}</td>
+            <td>${esc(r.name)}</td>
+            <td>${esc(r.status)}</td>
+            <td>${esc(tasks)}</td>
+          </tr>`;
+        }).join("");
+    }
+    document.getElementById("create").onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const created = await api("POST", "/api/workflow-defs", formValues(e.target));
+        location.href = "/workflow.html?id=" + created.id;
+      } catch (err) {
+        showError(err);
+      }
+    };
+    load().catch(showError);
+  </script>
+</body>
+</html>

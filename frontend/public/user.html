@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>user</title>
+</head>
+<body>
+  <h1 id="title">user</h1>
+  <p id="error"></p>
+
+  <h2>assign workflow</h2>
+  <form id="assign">
+    <select name="workflow_def_id"></select>
+    <button>assign</button>
+  </form>
+
+  <h2>workflow instances</h2>
+  <div id="workflows"></div>
+
+  <h2>task instances (deduped work)</h2>
+  <p>one row per (user, task_def). same id linked from multiple workflows = sharing.</p>
+  <table id="tasks"></table>
+
+  <script src="/common.js"></script>
+  <script>
+    const id = qs("id");
+
+    async function load() {
+      const data = await api("GET", "/api/users/" + id);
+      document.getElementById("title").textContent =
+        "user " + data.user.id + " — " + data.user.name + " (" + data.user.email + ")";
+
+      const defs = await api("GET", "/api/workflow-defs");
+      const active = defs.filter((d) => d.status === "active");
+      const sel = document.querySelector("[name=workflow_def_id]");
+      sel.innerHTML = active.length
+        ? active.map((d) =>
+            `<option value="${d.id}">${esc(d.code)} v${d.version} — ${esc(d.name)}</option>`
+          ).join("")
+        : '<option value="">(no active workflows)</option>';
+
+      document.getElementById("workflows").innerHTML = data.workflow_ins.map((w) => {
+        const rows = w.tasks.map((t) =>
+          `<tr>
+            <td>${t.position}</td>
+            <td>${esc(t.task_name)}</td>
+            <td>task_ins ${t.task_ins_id}</td>
+            <td>${esc(t.task_ins_status)}</td>
+            <td>${t.required ? "required" : "optional"}</td>
+          </tr>`
+        ).join("");
+        return `
+          <h3>workflow_ins ${w.id} — ${esc(w.code)} v${w.version} (${esc(w.workflow_name)}) — ${esc(w.status)}</h3>
+          <p>def ${w.workflow_def_id} is ${esc(w.workflow_def_status)}. started ${esc(w.started_at)}${w.completed_at ? ", completed " + esc(w.completed_at) : ""}</p>
+          <table>
+            <tr><th>pos</th><th>task</th><th>shared row</th><th>status</th><th></th></tr>
+            ${rows}
+          </table>
+        `;
+      }).join("") || "<p>none</p>";
+
+      const t = document.getElementById("tasks");
+      t.innerHTML = "<tr><th>task_ins id</th><th>task</th><th>status</th><th>used by workflow_ins</th><th>expires_at</th><th></th></tr>" +
+        data.task_ins.map((ti) => {
+          const actions = [];
+          if (ti.status !== "completed") {
+            actions.push(`<form data-act="complete" data-id="${ti.id}"><button>complete</button></form>`);
+          }
+          if (ti.status === "completed") {
+            actions.push(`<form data-act="expire" data-id="${ti.id}"><button>expire</button></form>`);
+          }
+          return `<tr>
+            <td>${ti.id}</td>
+            <td>${esc(ti.task_name)}</td>
+            <td>${esc(ti.status)}</td>
+            <td>${(ti.workflow_ins_ids || []).join(", ")}</td>
+            <td>${esc(ti.expires_at || "")}</td>
+            <td>${actions.join(" ")}</td>
+          </tr>`;
+        }).join("");
+    }
+
+    document.getElementById("assign").onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const v = formValues(e.target);
+        if (!v.workflow_def_id) throw new Error("no active workflow to assign");
+        await api("POST", "/api/users/" + id + "/workflows", {
+          workflow_def_id: Number(v.workflow_def_id),
+        });
+        location.reload();
+      } catch (err) {
+        showError(err);
+      }
+    };
+
+    document.getElementById("tasks").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      try {
+        await api("POST", "/api/task-ins/" + form.dataset.id + "/" + form.dataset.act);
+        location.reload();
+      } catch (err) {
+        showError(err);
+      }
+    });
+
+    load().catch(showError);
+  </script>
+</body>
+</html>

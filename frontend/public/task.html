@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>task def</title>
+</head>
+<body>
+  <h1>edit task def</h1>
+  <p>same id stays. labels and expiry period can change. already-done task_ins stay done; their expires_at is not rewritten.</p>
+  <p id="error"></p>
+  <form id="edit">
+    name: <input name="name" required>
+    type: <input name="type">
+    expires after days: <input name="expires_after_days" type="number" min="1">
+    <button>save</button>
+  </form>
+  <p><a href="/tasks.html">back</a></p>
+  <script src="/common.js"></script>
+  <script>
+    const id = qs("id");
+    function daysFromInterval(v) {
+      if (!v) return "";
+      const m = String(v).match(/(\d+)/);
+      return m ? m[1] : "";
+    }
+    async function load() {
+      const t = await api("GET", "/api/task-defs/" + id);
+      document.querySelector("[name=name]").value = t.name;
+      document.querySelector("[name=type]").value = t.type;
+      document.querySelector("[name=expires_after_days]").value = daysFromInterval(t.expires_after);
+    }
+    document.getElementById("edit").onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const v = formValues(e.target);
+        if (v.expires_after_days === "") v.expires_after_days = null;
+        await api("POST", "/api/task-defs/" + id, v);
+        location.reload();
+      } catch (err) {
+        showError(err);
+      }
+    };
+    load().catch(showError);
+  </script>
+</body>
+</html>

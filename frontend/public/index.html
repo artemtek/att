@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>attestation prototype</title>
+</head>
+<body>
+  <h1>attestation prototype</h1>
+  <p>defs are templates. ins are live work. overlapping tasks share one task_ins row.</p>
+  <h2>how to test dedup</h2>
+  <ol>
+    <li>create two <a href="/tasks.html">task defs</a> (e.g. DUA, HIPAA)</li>
+    <li>create two <a href="/workflows.html">workflow defs</a> that share one of those tasks</li>
+    <li>create a <a href="/users.html">user</a></li>
+    <li>on the user page, assign both workflows</li>
+    <li>shared task appears once under task_ins, linked from both workflow_ins</li>
+    <li>complete the shared task — both workflows see it done</li>
+    <li>archive a workflow or make a new version (old instances stay pinned)</li>
+  </ol>
+  <p>reset: <code>docker compose down -v && docker compose up --build</code></p>
+  <script src="/common.js"></script>
+</body>
+</html>
