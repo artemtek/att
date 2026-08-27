@@ -6,11 +6,12 @@
 </head>
 <body>
   <h1>users</h1>
+  <p>full_name matches DAME. roles here are <code>user_auth_roles</code> (not a column on users).</p>
   <p id="error"></p>
   <form id="create">
-    name: <input name="name" required>
+    full_name: <input name="full_name" required>
     email: <input name="email" type="email" required>
-    <span id="role-fields"></span>
+    <div id="role-fields"></div>
     <button>create</button>
   </form>
   <h2>list</h2>
@@ -19,12 +20,12 @@
   <script>
     async function load() {
       const roles = await api("GET", "/api/roles");
-      document.getElementById("role-fields").innerHTML = "roles: " + roleChecks("roles", roles, []);
+      document.getElementById("role-fields").innerHTML = "auth roles: " + roleChecks("roles", roles, []);
       const users = await api("GET", "/api/users");
-      const t = document.getElementById("list");
-      t.innerHTML = "<tr><th>id</th><th>name</th><th>email</th><th>roles</th></tr>" +
+      document.getElementById("list").innerHTML =
+        "<tr><th>id</th><th>full_name</th><th>email</th><th>auth roles</th></tr>" +
         users.map((u) =>
-          `<tr><td>${u.id}</td><td><a href="/user.html?id=${u.id}">${esc(u.name)}</a></td><td>${esc(u.email)}</td><td>${esc((u.roles || []).join(", "))}</td></tr>`
+          `<tr><td>${u.id}</td><td><a href="/user.html?id=${u.id}">${esc(u.full_name)}</a></td><td>${esc(u.email)}</td><td>${esc((u.roles || []).join(", "))}</td></tr>`
         ).join("");
     }
     document.getElementById("create").onsubmit = async (e) => {

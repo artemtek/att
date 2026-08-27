@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>certifications</title>
+</head>
+<body>
+  <h1>certifications</h1>
+  <p>submitted tasks that require approval. eligibility is live against the acting user's auth roles.</p>
+  <p id="error"></p>
+  <p>acting as user id: <input id="actor" type="number" min="1"> (must hold an approver role)</p>
+  <div id="list"></div>
+  <script src="/common.js"></script>
+  <script>
+    async function load() {
+      const rows = await api("GET", "/api/certifications");
+      document.getElementById("list").innerHTML = rows.map((r) =>
+        `<div>
+          <p>task_ins ${r.id} — ${esc(r.task_name)} — ${esc(r.full_name)} (${esc(r.email)})
+            — approver_roles: ${esc((r.approver_roles || []).join(", "))}</p>
+          <form data-id="${r.id}">
+            comment: <input name="comment">
+            <button name="decision" value="approved">approve</button>
+            <button name="decision" value="rejected">reject</button>
+          </form>
+        </div>`
+      ).join("") || "<p>none</p>";
+    }
+    document.getElementById("list").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const actor = document.getElementById("actor").value;
+      if (!actor) { showError(new Error("set acting user id")); return; }
+      const decision = e.submitter && e.submitter.value;
+      try {
+        await api("POST", "/api/task-ins/" + e.target.dataset.id + "/decide", {
+          approverUserId: Number(actor),
+          decision,
+          comment: formValues(e.target).comment || null,
+        });
+        location.reload();
+      } catch (err) { showError(err); }
+    });
+    load().catch(showError);
+  </script>
+</body>
+</html>

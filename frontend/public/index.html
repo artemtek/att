@@ -5,17 +5,17 @@
   <title>attestation prototype</title>
 </head>
 <body>
-  <h1>attestation prototype</h1>
-  <p>defs are templates. ins are live work. overlapping tasks share one task_ins row.</p>
-  <h2>how to test dedup</h2>
+  <h1>attestation prototype (DAME-fit)</h1>
+  <p>Replaces Approbo. Dedup is unique (user, task_def). Roles are DAME <code>user_role</code>; they live on <code>user_auth_roles</code> (auth-groups stand-in), not on users.</p>
+  <h2>how to test</h2>
   <ol>
-    <li>create two <a href="/tasks.html">task defs</a> (e.g. DUA, HIPAA)</li>
-    <li>create two <a href="/workflows.html">workflow defs</a> that share one of those tasks</li>
-    <li>create a <a href="/users.html">user</a></li>
-    <li>on the user page, assign both workflows</li>
-    <li>shared task appears once under task_ins, linked from both workflow_ins</li>
-    <li>complete the shared task — both workflows see it done</li>
-    <li>archive a workflow or make a new version (old instances stay pinned)</li>
+    <li>create task defs (acknowledgement vs document; DUA with approval + data_reviewer)</li>
+    <li>create two workflow defs that share a task, e.g. researcher (whitelist) and PI (whitelist), both including DUA</li>
+    <li>create a user; create a reviewer with <code>legal_rep_institutional_data_reviewer</code> and a whitelister</li>
+    <li>assign both workflows — shared task_ins id appears once</li>
+    <li>submit the shared task once; approve on <a href="/certifications.html">certifications</a> as the reviewer</li>
+    <li>both workflows move; whitelist on <a href="/whitelisting.html">whitelisting</a></li>
+    <li>user_auth_roles gains the granted role</li>
   </ol>
   <p>reset: <code>docker compose down -v && docker compose up --build</code></p>
   <script src="/common.js"></script>

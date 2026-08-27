@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>whitelisting</title>
+</head>
+<body>
+  <h1>whitelisting</h1>
+  <p>workflows in awaiting_approval. acting user must have legal_rep_institutional_whitelister.</p>
+  <p id="error"></p>
+  <p>acting as user id: <input id="actor" type="number" min="1"></p>
+  <div id="list"></div>
+  <script src="/common.js"></script>
+  <script>
+    async function load() {
+      const rows = await api("GET", "/api/whitelisting");
+      document.getElementById("list").innerHTML = rows.map((r) =>
+        `<div>
+          <p>workflow_ins ${r.id} — ${esc(r.code)} — ${esc(r.full_name)} — grants ${esc(r.grants_role || "")}</p>
+          <form data-id="${r.id}">
+            <button name="decision" value="approved">approve</button>
+            <button name="decision" value="rejected">reject</button>
+          </form>
+        </div>`
+      ).join("") || "<p>none</p>";
+    }
+    document.getElementById("list").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const actor = document.getElementById("actor").value;
+      if (!actor) { showError(new Error("set acting user id")); return; }
+      try {
+        await api("POST", "/api/workflow-ins/" + e.target.dataset.id + "/whitelist", {
+          approverUserId: Number(actor),
+          decision: e.submitter.value,
+        });
+        location.reload();
+      } catch (err) { showError(err); }
+    });
+    load().catch(showError);
+  </script>
+</body>
+</html>

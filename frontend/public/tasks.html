@@ -9,10 +9,11 @@
   <p id="error"></p>
   <form id="create">
     name: <input name="name" required>
-    type: <input name="type" value="attest">
-    expires after days: <input name="expires_after_days" type="number" min="1">
+    type: <select name="type"><option value="acknowledgement">acknowledgement</option><option value="document">document</option></select>
+    valid_for_days: <input name="valid_for_days" type="number" min="1">
     requires approval: <input type="checkbox" name="requires_approval" value="true">
-    <span id="approver-fields"></span>
+    completion date: <input type="checkbox" name="requires_completion_date" value="true">
+    <div id="approver-fields"></div>
     <button>create</button>
   </form>
   <h2>list</h2>
@@ -21,19 +22,18 @@
   <script>
     async function load() {
       const roles = await api("GET", "/api/roles");
-      document.getElementById("approver-fields").innerHTML =
-        "approver roles: " + roleChecks("approver_roles", roles, []);
+      document.getElementById("approver-fields").innerHTML = "approver roles: " + roleChecks("approver_roles", roles, []);
       const rows = await api("GET", "/api/task-defs");
       document.getElementById("list").innerHTML =
-        "<tr><th>id</th><th>name</th><th>type</th><th>expires_after</th><th>approval</th><th>approver_roles</th></tr>" +
+        "<tr><th>id</th><th>name</th><th>type</th><th>approval</th><th>approver_roles</th><th>valid_for_days</th></tr>" +
         rows.map((r) =>
           `<tr>
             <td>${r.id}</td>
             <td><a href="/task.html?id=${r.id}">${esc(r.name)}</a></td>
             <td>${esc(r.type)}</td>
-            <td>${esc(r.expires_after || "")}</td>
             <td>${r.requires_approval ? "yes" : "no"}</td>
             <td>${esc((r.approver_roles || []).join(", "))}</td>
+            <td>${esc(r.valid_for_days || "")}</td>
           </tr>`
         ).join("");
     }
@@ -41,14 +41,13 @@
       e.preventDefault();
       try {
         const v = formValues(e.target);
-        if (v.expires_after_days === "") delete v.expires_after_days;
+        if (v.valid_for_days === "") delete v.valid_for_days;
         v.requires_approval = e.target.requires_approval.checked;
+        v.requires_completion_date = e.target.requires_completion_date.checked;
         v.approver_roles = checked(e.target, "approver_roles");
         await api("POST", "/api/task-defs", v);
         location.reload();
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
     load().catch(showError);
   </script>

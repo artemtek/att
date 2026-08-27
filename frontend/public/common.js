@@ -30,7 +30,7 @@ function esc(s) {
 function nav() {
   document.body.insertAdjacentHTML(
     "afterbegin",
-    '<p><a href="/">home</a> | <a href="/users.html">users</a> | <a href="/tasks.html">task defs</a> | <a href="/workflows.html">workflow defs</a></p><hr>'
+    '<p><a href="/">home</a> | <a href="/users.html">users</a> | <a href="/tasks.html">task defs</a> | <a href="/workflows.html">workflow defs</a> | <a href="/certifications.html">certifications</a> | <a href="/whitelisting.html">whitelisting</a></p><hr>'
   );
 }
 

@@ -38,6 +38,7 @@
       document.getElementById("meta").textContent =
         "id " + w.id + ", status " + w.status +
         (w.grants_role ? ", grants " + w.grants_role : ", grants none") +
+        (w.requires_whitelisting ? ", whitelisting" : "") +
         (w.supersedes_id ? ", supersedes " + w.supersedes_id : "");
 
       const archived = w.status !== "active";

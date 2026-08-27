@@ -1,20 +1,23 @@
-# Attestation schema — decisions (2026-08-26)
+# Attestation schema — decisions
 
-From Cursor chat `f506bd53-6144-4f31-aa53-7e39ecb37f9a` (12:01–13:01 ET). Naming: `_def` = template, `_ins` = live run.
+Naming: `_def` = template, `_ins` = live run. Target: replace Approbo **inside DAME** (same DB, same backend).
 
 ## Tables
 
-- `user`
+DAME already has: `users`, `user_role` enum, `role_requests`, `files`. Do **not** recreate those in DAME; the prototype stubs them.
+
+New:
+
 - `task_def`
 - `workflow_def`
 - `workflow_task_def`
 - `task_ins`
 - `workflow_ins`
 - `workflow_task_ins`
+- `task_ins_document`
+- `task_ins_approval`
 
-`user` is not part of the workflow model. `user_id` is an FK on `workflow_ins` and `task_ins`.
-
-Optional later (not MVP): `task_dep_def` (ordering within a workflow), `task_event` / `workflow_event` (audit), `artifact` / `signature` (evidence on `task_ins`).
+Prototype-only: `user_auth_roles` (stand-in for auth groups). Does not ship to DAME. Roles are **not** a column on `users`.
 
 ## Core idea
 
@@ -80,28 +83,33 @@ Also unique on `workflow_task_def (workflow_def_id, task_def_id)` unless a workf
 
 To *not* share: drop the `task_ins` unique and do not reuse rows. The join table can still exist; it just would not collapse two workflows onto one task.
 
-## Columns (MVP)
+## Columns
 
-**`user`:** `id`, `email`, `name`, `roles role[]` (Postgres enum, not a table). GIN index on `roles`.
+**`users` (DAME / stub):** `id`, `email`, `full_name`. No `roles` column.
 
-**`task_def`:** `id`, `name`, `type`, `config`, `expires_after`, `requires_approval`, `approver_roles role[]`
+**`user_auth_roles` (prototype only):** `(user_id, role user_role)` PK. Live approver/whitelist checks read this.
 
-**`workflow_def`:** `id`, `name`, `code` (stable identity), `version`, `status`, `grants_role role` (nullable). Unique `(code, version)`. Optional `supersedes_id`.
+**`role_requests`:** `id`, `user_id`, `requested_role`, `approved_role`, `status`. `workflow_ins.role_request_id` points here.
 
-**`workflow_task_def`:** `id`, `workflow_def_id`, `task_def_id`, `position`, `required`. Optional per-workflow overrides (due offset, label).
+**`task_def`:** `name`, `description`, `type` (`document` | `acknowledgement`), `requires_approval`, `approver_roles user_role[]`, `valid_for_days`, `requires_completion_date`, `archived_at`.
 
-**`workflow_ins`:** `id`, `workflow_def_id`, `user_id`, `status`, `started_at`, `completed_at`, `grants_role` (copied from def at enroll). Partial unique `(user_id, grants_role)` where `status = pending` and `grants_role IS NOT NULL`.
+**`workflow_def`:** `code` + `version` (identity), `status`, `grants_role user_role` (nullable), `requires_whitelisting`. Unique `(code, version)`. One **active** def per `grants_role`. Optional `supersedes_id`.
 
-**`task_ins`:** `id`, `task_def_id`, `user_id`, `status`, `started_at`, `completed_at`, plus `expires_at` (snapshot)
+**`workflow_task_def`:** slot on a def. Unique `(workflow_def_id, task_def_id)`.
 
-**`workflow_task_ins`:** `id`, `workflow_ins_id`, `task_ins_id`, `workflow_task_def_id`
+**`workflow_ins`:** pinned to a def, `user_id` → `users`, `role_request_id`, `grants_role` copied at enroll, fat status, `archived_at`, whitelist columns. One **open** run per `(user, grants_role)`.
 
-Enum values: `researcher`, `pi`, `data_reviewer`, `whitelister`. No `role` table.
+**`task_ins`:** the work. Unique `(user_id, task_def_id)`. Status pending/submitted/approved/rejected/completed/expired. `expires_at` snapshot. `training_completed_at` for NIH-style certs.
 
-- Completing a `workflow_ins` with `grants_role` appends that value to `user.roles` (deduped).
-- Approver eligibility is live: `user.roles && task_def.approver_roles`. Grant a role on the user and they can approve immediately. Decision-time check is not wired in this prototype yet beyond storing the columns.
+**`workflow_task_ins`:** link only. Unique `(workflow_ins_id, workflow_task_def_id)`.
 
-Keep `workflow_task_def_id` on the instance join so you know which template slot this fulfills (order, required, overrides).
+**`task_ins_document`:** file + signature on the shared work row.
+
+**`task_ins_approval`:** decision on the shared work row. Eligibility is live vs `user_auth_roles` ∩ `task_def.approver_roles`.
+
+Completing a workflow with `grants_role` inserts that role into `user_auth_roles` (DAME: `authGroupsService.addUserToGroupByRole`).
+
+Keep `workflow_task_def_id` on the instance join so you know which template slot this fulfills.
 
 ## Versioning
 
@@ -144,7 +152,7 @@ Treat as a **new** `task_def` only when an already-done user must do different w
 
 Expiration is a **policy field**. It does not belong only on `task_def`.
 
-- `task_def.expires_after` — default (“this attestation lasts 1 year”). Fine to mutate; means “new completions use this,” not rewrite history.
+- `task_def.valid_for_days` — default (“this attestation lasts 1 year”). Fine to mutate; means “new completions use this,” not rewrite history.
 - `task_ins.expires_at` — snapshot when the task is completed (or started). This is the row the app actually checks. Dedup and “is this still valid?” read this, not the def.
 
 Workflow-level expiry (`workflow_ins` / `workflow_def`) is a different thing: the whole run goes stale. Don’t mix it with task expiry unless the product is “the package expires,” not “the signature expires.”
@@ -160,41 +168,51 @@ Do **not** create a new `task_def` just to change the period. That is a differen
 They keep the same `task_ins`. It stays **done**. Dedup still treats them as finished. Nothing in the unique constraint cares about name, description, or period.
 
 - **Name / description:** UI that reads `task_def` immediately shows the new title/copy, including on old completions. History rewrites. If that is ugly, snapshot name/description onto `task_ins` at complete time. MVP: live from `task_def` is fine.
-- **Period:** do **not** recompute `task_ins.expires_at` on already-done rows when you edit `task_def.expires_after`. Their clock stays what it was when they completed. Next completion (after expiry, or new users) stamps the new period.
+- **Period:** do **not** recompute `task_ins.expires_at` on already-done rows when you edit `task_def.valid_for_days`. Their clock stays what it was when they completed. Next completion (after expiry, or new users) stamps the new period.
 - If you *want* “everyone now expires in 6 months,” that is an explicit backfill of `task_ins.expires_at`, not a side effect of updating the def.
 
 ## ER diagram
 
 ```mermaid
 erDiagram
-    user ||--o{ workflow_ins : ""
-    user ||--o{ task_ins : ""
+    users ||--o{ user_auth_roles : ""
+    users ||--o{ workflow_ins : ""
+    users ||--o{ task_ins : ""
+    users ||--o{ role_requests : ""
 
     workflow_def ||--o{ workflow_task_def : ""
     task_def ||--o{ workflow_task_def : ""
 
     workflow_def ||--o{ workflow_ins : ""
     task_def ||--o{ task_ins : ""
+    role_requests ||--o| workflow_ins : ""
 
     workflow_ins ||--o{ workflow_task_ins : ""
     task_ins ||--o{ workflow_task_ins : ""
     workflow_task_def ||--o{ workflow_task_ins : ""
+    task_ins ||--o{ task_ins_document : ""
+    task_ins ||--o{ task_ins_approval : ""
+    files ||--o{ task_ins_document : ""
 
-    user {
+    users {
         int id PK
         string email
-        string name
-        role[] roles
+        string full_name
+    }
+
+    user_auth_roles {
+        int user_id PK
+        user_role role PK
     }
 
     task_def {
         int id PK
         string name
-        string type
-        json config
-        interval expires_after
+        task_def_type type
         bool requires_approval
-        role[] approver_roles
+        user_role[] approver_roles
+        int valid_for_days
+        bool requires_completion_date
     }
 
     workflow_def {
@@ -202,25 +220,18 @@ erDiagram
         string code
         int version
         string status
-        role grants_role
-    }
-
-    workflow_task_def {
-        int id PK
-        int workflow_def_id FK
-        int task_def_id FK
-        int position
-        bool required
+        user_role grants_role
+        bool requires_whitelisting
     }
 
     workflow_ins {
         int id PK
         int workflow_def_id FK
         int user_id FK
+        int role_request_id FK
         string status
-        timestamp started_at
-        timestamp completed_at
-        role grants_role
+        user_role grants_role
+        timestamp archived_at
     }
 
     task_ins {
@@ -228,9 +239,8 @@ erDiagram
         int task_def_id FK
         int user_id FK
         string status
-        timestamp started_at
-        timestamp completed_at
         timestamp expires_at
+        timestamp training_completed_at
     }
 
     workflow_task_ins {
@@ -243,6 +253,6 @@ erDiagram
 
 `task_ins`: **UK** `(user_id, task_def_id)`
 `workflow_task_ins`: **UK** `(workflow_ins_id, workflow_task_def_id)`
-`workflow_def`: **UK** `(code, version)`
-`workflow_ins`: **partial UK** `(user_id, grants_role)` where pending and `grants_role` is not null
-`role` enum: `researcher` | `pi` | `data_reviewer` | `whitelister`
+`workflow_def`: **UK** `(code, version)`; one **active** per `grants_role`
+`workflow_ins`: **partial UK** one open run per `(user_id, grants_role)`
+`user_role`: DAME `UserRole` enum. Prototype stores live membership in `user_auth_roles`.

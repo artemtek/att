@@ -6,11 +6,13 @@
 </head>
 <body>
   <h1>workflow defs</h1>
+  <p>identity is code+version. grants_role is optional (DAME startWorkflow looks up the active def for that role).</p>
   <p id="error"></p>
   <form id="create">
     code: <input name="code" required>
     name: <input name="name" required>
     grants role: <select name="grants_role"><option value="none">none</option></select>
+    requires whitelisting: <input type="checkbox" name="requires_whitelisting" value="true">
     <button>create v1</button>
   </form>
   <h2>list</h2>
@@ -24,7 +26,7 @@
         roles.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
       const rows = await api("GET", "/api/workflow-defs");
       document.getElementById("list").innerHTML =
-        "<tr><th>id</th><th>code</th><th>version</th><th>name</th><th>status</th><th>grants</th><th>tasks</th></tr>" +
+        "<tr><th>id</th><th>code</th><th>v</th><th>name</th><th>status</th><th>grants</th><th>whitelist</th><th>tasks</th></tr>" +
         rows.map((r) => {
           const tasks = (r.tasks || []).map((t) => t.task_name).join(", ");
           return `<tr>
@@ -34,6 +36,7 @@
             <td>${esc(r.name)}</td>
             <td>${esc(r.status)}</td>
             <td>${esc(r.grants_role || "")}</td>
+            <td>${r.requires_whitelisting ? "yes" : "no"}</td>
             <td>${esc(tasks)}</td>
           </tr>`;
         }).join("");
@@ -41,11 +44,11 @@
     document.getElementById("create").onsubmit = async (e) => {
       e.preventDefault();
       try {
-        const created = await api("POST", "/api/workflow-defs", formValues(e.target));
+        const v = formValues(e.target);
+        v.requires_whitelisting = e.target.requires_whitelisting.checked;
+        const created = await api("POST", "/api/workflow-defs", v);
         location.href = "/workflow.html?id=" + created.id;
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
     load().catch(showError);
   </script>

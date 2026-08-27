@@ -6,13 +6,14 @@
 </head>
 <body>
   <h1>edit task def</h1>
-  <p>same id stays. labels and expiry period can change. already-done task_ins stay done; their expires_at is not rewritten.</p>
+  <p>same id stays so dedup keeps working. do not replace the row when labels change.</p>
   <p id="error"></p>
   <form id="edit">
     name: <input name="name" required>
-    type: <input name="type">
-    expires after days: <input name="expires_after_days" type="number" min="1">
+    type: <select name="type"><option value="acknowledgement">acknowledgement</option><option value="document">document</option></select>
+    valid_for_days: <input name="valid_for_days" type="number" min="1">
     requires approval: <input type="checkbox" name="requires_approval" value="true">
+    completion date: <input type="checkbox" name="requires_completion_date" value="true">
     <div id="approver-fields"></div>
     <button>save</button>
   </form>
@@ -20,18 +21,14 @@
   <script src="/common.js"></script>
   <script>
     const id = qs("id");
-    function daysFromInterval(v) {
-      if (!v) return "";
-      const m = String(v).match(/(\d+)/);
-      return m ? m[1] : "";
-    }
     async function load() {
       const t = await api("GET", "/api/task-defs/" + id);
       const roles = await api("GET", "/api/roles");
       document.querySelector("[name=name]").value = t.name;
       document.querySelector("[name=type]").value = t.type;
-      document.querySelector("[name=expires_after_days]").value = daysFromInterval(t.expires_after);
+      document.querySelector("[name=valid_for_days]").value = t.valid_for_days || "";
       document.querySelector("[name=requires_approval]").checked = !!t.requires_approval;
+      document.querySelector("[name=requires_completion_date]").checked = !!t.requires_completion_date;
       document.getElementById("approver-fields").innerHTML =
         "approver roles: " + roleChecks("approver_roles", roles, t.approver_roles);
     }
@@ -39,14 +36,13 @@
       e.preventDefault();
       try {
         const v = formValues(e.target);
-        if (v.expires_after_days === "") v.expires_after_days = null;
+        if (v.valid_for_days === "") v.valid_for_days = null;
         v.requires_approval = e.target.requires_approval.checked;
+        v.requires_completion_date = e.target.requires_completion_date.checked;
         v.approver_roles = checked(e.target, "approver_roles");
         await api("POST", "/api/task-defs/" + id, v);
         location.reload();
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
     load().catch(showError);
   </script>

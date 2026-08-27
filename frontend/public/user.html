@@ -10,7 +10,7 @@
   <p id="roles-line"></p>
   <form id="roles">
     <span id="role-fields"></span>
-    <button>save roles</button>
+    <button>save auth roles</button>
   </form>
 
   <h2>assign workflow</h2>
@@ -22,9 +22,9 @@
   <h2>workflow instances</h2>
   <div id="workflows"></div>
 
-  <h2>task instances (deduped work)</h2>
-  <p>one row per (user, task_def). same id linked from multiple workflows = sharing.</p>
-  <table id="tasks"></table>
+  <h2>task instances (deduped)</h2>
+  <p>one row per (user, task_def). submit once; every linked workflow sees it.</p>
+  <div id="tasks"></div>
 
   <script src="/common.js"></script>
   <script>
@@ -34,9 +34,9 @@
       const data = await api("GET", "/api/users/" + id);
       const allRoles = await api("GET", "/api/roles");
       document.getElementById("title").textContent =
-        "user " + data.user.id + " — " + data.user.name + " (" + data.user.email + ")";
+        "user " + data.user.id + " — " + data.user.full_name + " (" + data.user.email + ")";
       document.getElementById("roles-line").textContent =
-        "roles: " + ((data.user.roles || []).join(", ") || "(none)");
+        "auth roles: " + ((data.user.roles || []).join(", ") || "(none)");
       document.getElementById("role-fields").innerHTML = roleChecks("roles", allRoles, data.user.roles);
 
       const defs = await api("GET", "/api/workflow-defs");
@@ -44,7 +44,7 @@
       const sel = document.querySelector("[name=workflow_def_id]");
       sel.innerHTML = active.length
         ? active.map((d) =>
-            `<option value="${d.id}">${esc(d.code)} v${d.version} — ${esc(d.name)}</option>`
+            `<option value="${d.id}">${esc(d.code)} v${d.version} — ${esc(d.name)}${d.grants_role ? " [" + d.grants_role + "]" : ""}</option>`
           ).join("")
         : '<option value="">(no active workflows)</option>';
 
@@ -59,8 +59,8 @@
           </tr>`
         ).join("");
         return `
-          <h3>workflow_ins ${w.id} — ${esc(w.code)} v${w.version} (${esc(w.workflow_name)}) — ${esc(w.status)}</h3>
-          <p>def ${w.workflow_def_id} is ${esc(w.workflow_def_status)}${w.grants_role ? ", grants " + esc(w.grants_role) : ""}. started ${esc(w.started_at)}${w.completed_at ? ", completed " + esc(w.completed_at) : ""}</p>
+          <h3>workflow_ins ${w.id} — ${esc(w.code)} v${w.version} — ${esc(w.status)}</h3>
+          <p>grants ${esc(w.grants_role || "none")}; whitelist ${w.requires_whitelisting ? "yes" : "no"}; role_request ${w.role_request_id || "none"}</p>
           <table>
             <tr><th>pos</th><th>task</th><th>shared row</th><th>status</th><th></th></tr>
             ${rows}
@@ -68,64 +68,56 @@
         `;
       }).join("") || "<p>none</p>";
 
-      const t = document.getElementById("tasks");
-      t.innerHTML = "<tr><th>task_ins id</th><th>task</th><th>status</th><th>used by workflow_ins</th><th>expires_at</th><th></th></tr>" +
-        data.task_ins.map((ti) => {
-          const actions = [];
-          if (ti.status !== "completed") {
-            actions.push(`<form data-act="complete" data-id="${ti.id}"><button>complete</button></form>`);
-          }
-          if (ti.status === "completed") {
-            actions.push(`<form data-act="expire" data-id="${ti.id}"><button>expire</button></form>`);
-          }
-          return `<tr>
-            <td>${ti.id}</td>
-            <td>${esc(ti.task_name)}</td>
-            <td>${esc(ti.status)}</td>
-            <td>${(ti.workflow_ins_ids || []).join(", ")}</td>
-            <td>${esc(ti.expires_at || "")}</td>
-            <td>${actions.join(" ")}</td>
-          </tr>`;
-        }).join("");
+      document.getElementById("tasks").innerHTML = data.task_ins.map((ti) => {
+        const canSubmit = ti.status === "pending" || ti.status === "expired" || ti.status === "rejected";
+        return `<div>
+          <p><b>task_ins ${ti.id}</b> ${esc(ti.task_name)} (${esc(ti.type)}) — ${esc(ti.status)}
+            — workflows ${ (ti.workflow_ins_ids || []).join(", ") }
+            ${ti.requires_approval ? " — needs approval" : ""}</p>
+          ${canSubmit ? `
+            <form data-act="submit" data-id="${ti.id}">
+              signature: <input name="signature_name">
+              file name: <input name="file_name" placeholder="optional unless document">
+              training date: <input name="training_completed_at" type="date">
+              <button>submit</button>
+            </form>` : ""}
+          ${ti.status === "completed" || ti.status === "approved" ? `<form data-act="expire" data-id="${ti.id}"><button>expire</button></form>` : ""}
+        </div>`;
+      }).join("") || "<p>none</p>";
     }
 
     document.getElementById("roles").onsubmit = async (e) => {
       e.preventDefault();
       try {
-        await api("POST", "/api/users/" + id + "/roles", {
-          roles: checked(e.target, "roles"),
-        });
+        await api("POST", "/api/users/" + id + "/roles", { roles: checked(e.target, "roles") });
         location.reload();
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
-
     document.getElementById("assign").onsubmit = async (e) => {
       e.preventDefault();
       try {
         const v = formValues(e.target);
-        if (!v.workflow_def_id) throw new Error("no active workflow to assign");
-        await api("POST", "/api/users/" + id + "/workflows", {
-          workflow_def_id: Number(v.workflow_def_id),
-        });
+        if (!v.workflow_def_id) throw new Error("no active workflow");
+        await api("POST", "/api/users/" + id + "/workflows", { workflow_def_id: Number(v.workflow_def_id) });
         location.reload();
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     };
-
     document.getElementById("tasks").addEventListener("submit", async (e) => {
       e.preventDefault();
       const form = e.target;
       try {
-        await api("POST", "/api/task-ins/" + form.dataset.id + "/" + form.dataset.act);
+        if (form.dataset.act === "expire") {
+          await api("POST", "/api/task-ins/" + form.dataset.id + "/expire");
+        } else {
+          const v = formValues(form);
+          if (!v.signature_name) delete v.signature_name;
+          if (!v.file_name) delete v.file_name;
+          if (!v.training_completed_at) delete v.training_completed_at;
+          await api("POST", "/api/task-ins/" + form.dataset.id + "/submit", v);
+        }
         location.reload();
-      } catch (err) {
-        showError(err);
-      }
+      } catch (err) { showError(err); }
     });
-
     load().catch(showError);
   </script>
 </body>
