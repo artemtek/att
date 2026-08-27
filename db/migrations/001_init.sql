@@ -1,15 +1,26 @@
+CREATE TYPE role AS ENUM (
+  'researcher',
+  'pi',
+  'data_reviewer',
+  'whitelister'
+);
+
 CREATE TABLE "user" (
   id SERIAL PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL
+  name TEXT NOT NULL,
+  roles role[] NOT NULL DEFAULT '{}'
 );
+CREATE INDEX user_roles_gin ON "user" USING GIN (roles);
 
 CREATE TABLE task_def (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'attest',
   config JSONB NOT NULL DEFAULT '{}'::jsonb,
-  expires_after INTERVAL
+  expires_after INTERVAL,
+  requires_approval BOOLEAN NOT NULL DEFAULT false,
+  approver_roles role[] NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE workflow_def (
@@ -19,6 +30,7 @@ CREATE TABLE workflow_def (
   version INT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
   supersedes_id INT REFERENCES workflow_def(id),
+  grants_role role,
   UNIQUE (code, version)
 );
 
@@ -37,8 +49,12 @@ CREATE TABLE workflow_ins (
   user_id INT NOT NULL REFERENCES "user"(id),
   status TEXT NOT NULL CHECK (status IN ('pending', 'completed')),
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  completed_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ,
+  grants_role role
 );
+CREATE UNIQUE INDEX workflow_ins_one_open_per_grant
+  ON workflow_ins (user_id, grants_role)
+  WHERE status = 'pending' AND grants_role IS NOT NULL;
 
 CREATE TABLE task_ins (
   id SERIAL PRIMARY KEY,

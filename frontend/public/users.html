@@ -10,6 +10,7 @@
   <form id="create">
     name: <input name="name" required>
     email: <input name="email" type="email" required>
+    <span id="role-fields"></span>
     <button>create</button>
   </form>
   <h2>list</h2>
@@ -17,17 +18,21 @@
   <script src="/common.js"></script>
   <script>
     async function load() {
+      const roles = await api("GET", "/api/roles");
+      document.getElementById("role-fields").innerHTML = "roles: " + roleChecks("roles", roles, []);
       const users = await api("GET", "/api/users");
       const t = document.getElementById("list");
-      t.innerHTML = "<tr><th>id</th><th>name</th><th>email</th></tr>" +
+      t.innerHTML = "<tr><th>id</th><th>name</th><th>email</th><th>roles</th></tr>" +
         users.map((u) =>
-          `<tr><td>${u.id}</td><td><a href="/user.html?id=${u.id}">${esc(u.name)}</a></td><td>${esc(u.email)}</td></tr>`
+          `<tr><td>${u.id}</td><td><a href="/user.html?id=${u.id}">${esc(u.name)}</a></td><td>${esc(u.email)}</td><td>${esc((u.roles || []).join(", "))}</td></tr>`
         ).join("");
     }
     document.getElementById("create").onsubmit = async (e) => {
       e.preventDefault();
       try {
-        await api("POST", "/api/users", formValues(e.target));
+        const v = formValues(e.target);
+        v.roles = checked(e.target, "roles");
+        await api("POST", "/api/users", v);
         location.reload();
       } catch (err) {
         showError(err);

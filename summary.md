@@ -82,19 +82,24 @@ To *not* share: drop the `task_ins` unique and do not reuse rows. The join table
 
 ## Columns (MVP)
 
-**`user`:** `id`, `email`, `name`
+**`user`:** `id`, `email`, `name`, `roles role[]` (Postgres enum, not a table). GIN index on `roles`.
 
-**`task_def`:** `id`, `name`, `type`, `config`, plus `expires_after` (default period)
+**`task_def`:** `id`, `name`, `type`, `config`, `expires_after`, `requires_approval`, `approver_roles role[]`
 
-**`workflow_def`:** `id`, `name`, `code` (stable identity), `version`, `status`. Unique `(code, version)`. Optional `supersedes_id`.
+**`workflow_def`:** `id`, `name`, `code` (stable identity), `version`, `status`, `grants_role role` (nullable). Unique `(code, version)`. Optional `supersedes_id`.
 
 **`workflow_task_def`:** `id`, `workflow_def_id`, `task_def_id`, `position`, `required`. Optional per-workflow overrides (due offset, label).
 
-**`workflow_ins`:** `id`, `workflow_def_id`, `user_id`, `status`, `started_at`, `completed_at`
+**`workflow_ins`:** `id`, `workflow_def_id`, `user_id`, `status`, `started_at`, `completed_at`, `grants_role` (copied from def at enroll). Partial unique `(user_id, grants_role)` where `status = pending` and `grants_role IS NOT NULL`.
 
 **`task_ins`:** `id`, `task_def_id`, `user_id`, `status`, `started_at`, `completed_at`, plus `expires_at` (snapshot)
 
 **`workflow_task_ins`:** `id`, `workflow_ins_id`, `task_ins_id`, `workflow_task_def_id`
+
+Enum values: `researcher`, `pi`, `data_reviewer`, `whitelister`. No `role` table.
+
+- Completing a `workflow_ins` with `grants_role` appends that value to `user.roles` (deduped).
+- Approver eligibility is live: `user.roles && task_def.approver_roles`. Grant a role on the user and they can approve immediately. Decision-time check is not wired in this prototype yet beyond storing the columns.
 
 Keep `workflow_task_def_id` on the instance join so you know which template slot this fulfills (order, required, overrides).
 
@@ -179,6 +184,7 @@ erDiagram
         int id PK
         string email
         string name
+        role[] roles
     }
 
     task_def {
@@ -187,6 +193,8 @@ erDiagram
         string type
         json config
         interval expires_after
+        bool requires_approval
+        role[] approver_roles
     }
 
     workflow_def {
@@ -194,6 +202,7 @@ erDiagram
         string code
         int version
         string status
+        role grants_role
     }
 
     workflow_task_def {
@@ -211,6 +220,7 @@ erDiagram
         string status
         timestamp started_at
         timestamp completed_at
+        role grants_role
     }
 
     task_ins {
@@ -234,3 +244,5 @@ erDiagram
 `task_ins`: **UK** `(user_id, task_def_id)`
 `workflow_task_ins`: **UK** `(workflow_ins_id, workflow_task_def_id)`
 `workflow_def`: **UK** `(code, version)`
+`workflow_ins`: **partial UK** `(user_id, grants_role)` where pending and `grants_role` is not null
+`role` enum: `researcher` | `pi` | `data_reviewer` | `whitelister`

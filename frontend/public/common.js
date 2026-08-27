@@ -45,4 +45,22 @@ function formValues(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
 
+function checked(form, name) {
+  return [...form.querySelectorAll('input[name="' + name + '"]:checked')].map(
+    (el) => el.value
+  );
+}
+
+function roleChecks(name, all, selected) {
+  const sel = new Set(selected || []);
+  return (all || [])
+    .map(
+      (r) =>
+        `<label><input type="checkbox" name="${name}" value="${esc(r)}"${
+          sel.has(r) ? " checked" : ""
+        }> ${esc(r)}</label>`
+    )
+    .join(" ");
+}
+
 document.addEventListener("DOMContentLoaded", nav);

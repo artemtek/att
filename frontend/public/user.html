@@ -7,6 +7,11 @@
 <body>
   <h1 id="title">user</h1>
   <p id="error"></p>
+  <p id="roles-line"></p>
+  <form id="roles">
+    <span id="role-fields"></span>
+    <button>save roles</button>
+  </form>
 
   <h2>assign workflow</h2>
   <form id="assign">
@@ -27,8 +32,12 @@
 
     async function load() {
       const data = await api("GET", "/api/users/" + id);
+      const allRoles = await api("GET", "/api/roles");
       document.getElementById("title").textContent =
         "user " + data.user.id + " — " + data.user.name + " (" + data.user.email + ")";
+      document.getElementById("roles-line").textContent =
+        "roles: " + ((data.user.roles || []).join(", ") || "(none)");
+      document.getElementById("role-fields").innerHTML = roleChecks("roles", allRoles, data.user.roles);
 
       const defs = await api("GET", "/api/workflow-defs");
       const active = defs.filter((d) => d.status === "active");
@@ -51,7 +60,7 @@
         ).join("");
         return `
           <h3>workflow_ins ${w.id} — ${esc(w.code)} v${w.version} (${esc(w.workflow_name)}) — ${esc(w.status)}</h3>
-          <p>def ${w.workflow_def_id} is ${esc(w.workflow_def_status)}. started ${esc(w.started_at)}${w.completed_at ? ", completed " + esc(w.completed_at) : ""}</p>
+          <p>def ${w.workflow_def_id} is ${esc(w.workflow_def_status)}${w.grants_role ? ", grants " + esc(w.grants_role) : ""}. started ${esc(w.started_at)}${w.completed_at ? ", completed " + esc(w.completed_at) : ""}</p>
           <table>
             <tr><th>pos</th><th>task</th><th>shared row</th><th>status</th><th></th></tr>
             ${rows}
@@ -79,6 +88,18 @@
           </tr>`;
         }).join("");
     }
+
+    document.getElementById("roles").onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await api("POST", "/api/users/" + id + "/roles", {
+          roles: checked(e.target, "roles"),
+        });
+        location.reload();
+      } catch (err) {
+        showError(err);
+      }
+    };
 
     document.getElementById("assign").onsubmit = async (e) => {
       e.preventDefault();

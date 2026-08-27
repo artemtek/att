@@ -12,6 +12,8 @@
     name: <input name="name" required>
     type: <input name="type">
     expires after days: <input name="expires_after_days" type="number" min="1">
+    requires approval: <input type="checkbox" name="requires_approval" value="true">
+    <div id="approver-fields"></div>
     <button>save</button>
   </form>
   <p><a href="/tasks.html">back</a></p>
@@ -25,15 +27,21 @@
     }
     async function load() {
       const t = await api("GET", "/api/task-defs/" + id);
+      const roles = await api("GET", "/api/roles");
       document.querySelector("[name=name]").value = t.name;
       document.querySelector("[name=type]").value = t.type;
       document.querySelector("[name=expires_after_days]").value = daysFromInterval(t.expires_after);
+      document.querySelector("[name=requires_approval]").checked = !!t.requires_approval;
+      document.getElementById("approver-fields").innerHTML =
+        "approver roles: " + roleChecks("approver_roles", roles, t.approver_roles);
     }
     document.getElementById("edit").onsubmit = async (e) => {
       e.preventDefault();
       try {
         const v = formValues(e.target);
         if (v.expires_after_days === "") v.expires_after_days = null;
+        v.requires_approval = e.target.requires_approval.checked;
+        v.approver_roles = checked(e.target, "approver_roles");
         await api("POST", "/api/task-defs/" + id, v);
         location.reload();
       } catch (err) {

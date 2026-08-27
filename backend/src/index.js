@@ -17,6 +17,29 @@ function httpError(status, message) {
   return err;
 }
 
+function asRoleList(v) {
+  if (v == null || v === "") return [];
+  const arr = Array.isArray(v) ? v : String(v).split(",");
+  return [...new Set(arr.map((r) => String(r).trim()).filter(Boolean))];
+}
+
+function asRoleOrNull(v) {
+  if (v == null || v === "" || v === "none") return null;
+  return String(v);
+}
+
+async function grantRole(client, userId, role) {
+  if (!role) return;
+  await client.query(
+    `
+    UPDATE "user"
+    SET roles = ARRAY(SELECT DISTINCT unnest(roles || ARRAY[$2::role]))
+    WHERE id = $1
+    `,
+    [userId, role]
+  );
+}
+
 async function maybeCompleteWorkflow(client, workflowInsId) {
   const pending = await client.query(
     `
@@ -32,14 +55,18 @@ async function maybeCompleteWorkflow(client, workflowInsId) {
     [workflowInsId]
   );
   if (pending.rowCount === 0) {
-    await client.query(
+    const done = await client.query(
       `
       UPDATE workflow_ins
       SET status = 'completed', completed_at = now()
       WHERE id = $1 AND status = 'pending'
+      RETURNING user_id, grants_role
       `,
       [workflowInsId]
     );
+    if (done.rowCount) {
+      await grantRole(client, done.rows[0].user_id, done.rows[0].grants_role);
+    }
   }
 }
 
@@ -89,10 +116,26 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.get(
+  "/api/roles",
+  wrap(async (_req, res) => {
+    const { rows } = await pool.query(
+      `
+      SELECT e.enumlabel AS role
+      FROM pg_enum e
+      JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname = 'role'
+      ORDER BY e.enumsortorder
+      `
+    );
+    res.json(rows.map((r) => r.role));
+  })
+);
+
+app.get(
   "/api/users",
   wrap(async (_req, res) => {
     const { rows } = await pool.query(
-      'SELECT id, email, name FROM "user" ORDER BY id'
+      'SELECT id, email, name, roles::text[] AS roles FROM "user" ORDER BY id'
     );
     res.json(rows);
   })
@@ -101,13 +144,25 @@ app.get(
 app.post(
   "/api/users",
   wrap(async (req, res) => {
-    const { email, name } = req.body;
+    const { email, name, roles } = req.body;
     if (!email || !name) throw httpError(400, "email and name required");
     const { rows } = await pool.query(
-      'INSERT INTO "user" (email, name) VALUES ($1, $2) RETURNING id, email, name',
-      [email, name]
+      'INSERT INTO "user" (email, name, roles) VALUES ($1, $2, $3::role[]) RETURNING id, email, name, roles::text[] AS roles',
+      [email, name, asRoleList(roles)]
     );
     res.status(201).json(rows[0]);
+  })
+);
+
+app.post(
+  "/api/users/:id/roles",
+  wrap(async (req, res) => {
+    const { rows } = await pool.query(
+      'UPDATE "user" SET roles = $2::role[] WHERE id = $1 RETURNING id, email, name, roles::text[] AS roles',
+      [req.params.id, asRoleList(req.body.roles)]
+    );
+    if (!rows.length) throw httpError(404, "user not found");
+    res.json(rows[0]);
   })
 );
 
@@ -115,7 +170,7 @@ app.get(
   "/api/users/:id",
   wrap(async (req, res) => {
     const user = await pool.query(
-      'SELECT id, email, name FROM "user" WHERE id = $1',
+      'SELECT id, email, name, roles::text[] AS roles FROM "user" WHERE id = $1',
       [req.params.id]
     );
     if (!user.rowCount) throw httpError(404, "user not found");
@@ -123,7 +178,7 @@ app.get(
     const workflowIns = await pool.query(
       `
       SELECT
-        wi.id, wi.status, wi.started_at, wi.completed_at, wi.workflow_def_id,
+        wi.id, wi.status, wi.started_at, wi.completed_at, wi.workflow_def_id, wi.grants_role,
         wd.code, wd.version, wd.name AS workflow_name, wd.status AS workflow_def_status
       FROM workflow_ins wi
       JOIN workflow_def wd ON wd.id = wi.workflow_def_id
@@ -201,7 +256,8 @@ app.get(
   wrap(async (_req, res) => {
     const { rows } = await pool.query(
       `
-      SELECT id, name, type, config, expires_after::text AS expires_after
+      SELECT id, name, type, config, expires_after::text AS expires_after,
+             requires_approval, approver_roles::text[] AS approver_roles
       FROM task_def
       ORDER BY id
       `
@@ -214,7 +270,7 @@ app.get(
   "/api/task-defs/:id",
   wrap(async (req, res) => {
     const { rows } = await pool.query(
-      "SELECT id, name, type, config, expires_after::text AS expires_after FROM task_def WHERE id = $1",
+      "SELECT id, name, type, config, expires_after::text AS expires_after, requires_approval, approver_roles::text[] AS approver_roles FROM task_def WHERE id = $1",
       [req.params.id]
     );
     if (!rows.length) throw httpError(404, "task_def not found");
@@ -225,7 +281,7 @@ app.get(
 app.post(
   "/api/task-defs",
   wrap(async (req, res) => {
-    const { name, type, expires_after_days } = req.body;
+    const { name, type, expires_after_days, requires_approval, approver_roles } = req.body;
     if (!name) throw httpError(400, "name required");
     const expires =
       expires_after_days === "" || expires_after_days == null
@@ -236,11 +292,17 @@ app.post(
     }
     const { rows } = await pool.query(
       `
-      INSERT INTO task_def (name, type, expires_after)
-      VALUES ($1, $2, $3::interval)
-      RETURNING id, name, type, config, expires_after::text AS expires_after
+      INSERT INTO task_def (name, type, expires_after, requires_approval, approver_roles)
+      VALUES ($1, $2, $3::interval, $4, $5::role[])
+      RETURNING id, name, type, config, expires_after::text AS expires_after, requires_approval, approver_roles::text[] AS approver_roles
       `,
-      [name, type || "attest", expires]
+      [
+        name,
+        type || "attest",
+        expires,
+        requires_approval === true || requires_approval === "true",
+        asRoleList(approver_roles),
+      ]
     );
     res.status(201).json(rows[0]);
   })
@@ -249,7 +311,7 @@ app.post(
 app.post(
   "/api/task-defs/:id",
   wrap(async (req, res) => {
-    const { name, type, expires_after_days } = req.body;
+    const { name, type, expires_after_days, requires_approval, approver_roles } = req.body;
     const current = await pool.query("SELECT * FROM task_def WHERE id = $1", [
       req.params.id,
     ]);
@@ -263,11 +325,26 @@ app.post(
       UPDATE task_def
       SET name = COALESCE($2, name),
           type = COALESCE($3, type),
-          expires_after = $4::interval
+          expires_after = $4::interval,
+          requires_approval = COALESCE($5, requires_approval),
+          approver_roles = $6::role[]
       WHERE id = $1
-      RETURNING id, name, type, config, expires_after::text AS expires_after
+      RETURNING id, name, type, config, expires_after::text AS expires_after, requires_approval, approver_roles::text[] AS approver_roles
       `,
-      [req.params.id, name || null, type || null, expires]
+      [
+        req.params.id,
+        name || null,
+        type || null,
+        expires,
+        typeof requires_approval === "boolean"
+          ? requires_approval
+          : requires_approval === "true"
+            ? true
+            : requires_approval === "false"
+              ? false
+              : null,
+        asRoleList(approver_roles),
+      ]
     );
     res.json(rows[0]);
   })
@@ -279,7 +356,7 @@ app.get(
     const { rows } = await pool.query(
       `
       SELECT
-        wd.id, wd.name, wd.code, wd.version, wd.status, wd.supersedes_id,
+        wd.id, wd.name, wd.code, wd.version, wd.status, wd.supersedes_id, wd.grants_role,
         COALESCE(
           json_agg(
             json_build_object(
@@ -327,7 +404,7 @@ app.get(
 app.post(
   "/api/workflow-defs",
   wrap(async (req, res) => {
-    const { code, name } = req.body;
+    const { code, name, grants_role } = req.body;
     if (!code || !name) throw httpError(400, "code and name required");
     const existing = await pool.query(
       "SELECT 1 FROM workflow_def WHERE code = $1 LIMIT 1",
@@ -338,11 +415,11 @@ app.post(
     }
     const { rows } = await pool.query(
       `
-      INSERT INTO workflow_def (name, code, version, status)
-      VALUES ($1, $2, 1, 'active')
+      INSERT INTO workflow_def (name, code, version, status, grants_role)
+      VALUES ($1, $2, 1, 'active', $3::role)
       RETURNING *
       `,
-      [name, code]
+      [name, code, asRoleOrNull(grants_role)]
     );
     res.status(201).json(rows[0]);
   })
@@ -449,11 +526,11 @@ app.post(
       );
       const created = await client.query(
         `
-        INSERT INTO workflow_def (name, code, version, status, supersedes_id)
-        VALUES ($1, $2, $3, 'active', $4)
+        INSERT INTO workflow_def (name, code, version, status, supersedes_id, grants_role)
+        VALUES ($1, $2, $3, 'active', $4, $5)
         RETURNING *
         `,
-        [old.name, old.code, ver.rows[0].n, old.id]
+        [old.name, old.code, ver.rows[0].n, old.id, old.grants_role]
       );
       await client.query(
         `
@@ -507,11 +584,11 @@ app.post(
       }
       const wf = await client.query(
         `
-        INSERT INTO workflow_ins (workflow_def_id, user_id, status, started_at)
-        VALUES ($1, $2, 'pending', now())
+        INSERT INTO workflow_ins (workflow_def_id, user_id, status, started_at, grants_role)
+        VALUES ($1, $2, 'pending', now(), $3)
         RETURNING *
         `,
-        [workflow_def_id, req.params.id]
+        [workflow_def_id, req.params.id, def.rows[0].grants_role]
       );
       const slots = await client.query(
         "SELECT * FROM workflow_task_def WHERE workflow_def_id = $1 ORDER BY position",
@@ -617,6 +694,9 @@ app.post(
 );
 
 app.use((err, _req, res, _next) => {
+  if (err.code === "22P02") {
+    return res.status(400).json({ error: "invalid role: " + err.message });
+  }
   if (err.code === "23505") {
     return res.status(409).json({ error: "unique constraint: " + err.detail });
   }

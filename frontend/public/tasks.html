@@ -11,6 +11,8 @@
     name: <input name="name" required>
     type: <input name="type" value="attest">
     expires after days: <input name="expires_after_days" type="number" min="1">
+    requires approval: <input type="checkbox" name="requires_approval" value="true">
+    <span id="approver-fields"></span>
     <button>create</button>
   </form>
   <h2>list</h2>
@@ -18,15 +20,20 @@
   <script src="/common.js"></script>
   <script>
     async function load() {
+      const roles = await api("GET", "/api/roles");
+      document.getElementById("approver-fields").innerHTML =
+        "approver roles: " + roleChecks("approver_roles", roles, []);
       const rows = await api("GET", "/api/task-defs");
       document.getElementById("list").innerHTML =
-        "<tr><th>id</th><th>name</th><th>type</th><th>expires_after</th></tr>" +
+        "<tr><th>id</th><th>name</th><th>type</th><th>expires_after</th><th>approval</th><th>approver_roles</th></tr>" +
         rows.map((r) =>
           `<tr>
             <td>${r.id}</td>
             <td><a href="/task.html?id=${r.id}">${esc(r.name)}</a></td>
             <td>${esc(r.type)}</td>
             <td>${esc(r.expires_after || "")}</td>
+            <td>${r.requires_approval ? "yes" : "no"}</td>
+            <td>${esc((r.approver_roles || []).join(", "))}</td>
           </tr>`
         ).join("");
     }
@@ -35,6 +42,8 @@
       try {
         const v = formValues(e.target);
         if (v.expires_after_days === "") delete v.expires_after_days;
+        v.requires_approval = e.target.requires_approval.checked;
+        v.approver_roles = checked(e.target, "approver_roles");
         await api("POST", "/api/task-defs", v);
         location.reload();
       } catch (err) {
